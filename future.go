@@ -13,10 +13,16 @@ type Value = interface{}
 
 // Inner Task
 type ITask struct {
+	id      uint
 	cancel  *atomic.Value
 	p       *Progress
 	s       sync.WaitGroup
 	s_ready *atomic.Value
+}
+
+// Get id of the task
+func (it *ITask) Id() uint {
+	return it.id
 }
 
 // Check if the task if canceled
@@ -53,7 +59,7 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	cancel.Store(false)
 	s_ready.Store(false)
 	var s sync.WaitGroup
-	it := &ITask{cancel: cancel, p: &Progress{current: nil}, s: s, s_ready: s_ready}
+	it := &ITask{id: id, cancel: cancel, p: &Progress{current: nil}, s: s, s_ready: s_ready}
 	return &Task{id: id, awaiting: awaiting, ready: ready, it: it, fn: fn, p: Progress{current: nil}}
 }
 
