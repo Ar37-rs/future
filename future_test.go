@@ -23,7 +23,7 @@ func TestDrive(t *testing.T) {
 	count := 0
 
 	for {
-		test_task.Resolve(2, func(p *task.Progress, done bool) {
+		test_task.TryResolve(func(p *task.Progress, done bool) {
 
 			p.Current(func(v task.Value) {
 				k := v.(int)

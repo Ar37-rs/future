@@ -131,8 +131,8 @@ func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 			if f.ready.Load().(bool) {
 				f.ready.Store(false)
 				f.it.suspend.Store(false)
-				f.awaiting.Store(false)
 				fn(&f.p, true)
+				f.awaiting.Store(false)
 				f.p = Progress{cancel: nil, complete: nil, _error: nil}
 			} else if f.IsDone() {
 				break
