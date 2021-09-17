@@ -25,7 +25,8 @@ func main() {
 		for {
 			// // return task.Cancel(..) if canceled.
 			// if it.ShouldCancel() {
-			// 	return task.Cancel("caceled")
+			// 	cancel := fmt.Sprintf(`the task with id: %d canceled`, it.Id())
+			// 	return task.Cancel(cancel)
 			// }
 			count += 1
 			time.Sleep(time.Millisecond * 10)
@@ -38,7 +39,7 @@ func main() {
 		complete := fmt.Sprintf(`the task with id: %d completed`, it.Id())
 		return task.Complete(complete)
 		// // return error if need to.
-		// _error := errors.New(fmt.Sprintf(`the task with id: %d error`, it.Id()))
+		// _error := fmt.Errorf(`the task with id: %d error`, it.Id())
 		// return task.Error(_error)
 	})
 
