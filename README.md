@@ -24,7 +24,7 @@ func main() {
 		count := 0
 		for {
 			// // return task.Cancel(..) if canceled.
-			// if it.IsCanceled() {
+			// if it.ShouldCancel() {
 			// 	return task.Cancel("caceled")
 			// }
 			count += 1
