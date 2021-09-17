@@ -133,8 +133,9 @@ func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 				f.it.suspend.Store(false)
 				fn(f.p, true)
 				f.awaiting.Store(false)
-				*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-				f.it.p.current = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+				p := Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+				*f.p = p
+				*f.it.p = p
 			} else if f.IsDone() {
 				break
 			}
