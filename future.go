@@ -52,7 +52,7 @@ type Task struct {
 	awaiting, ready *atomic.Value
 	it              *ITask
 	fn              func(*ITask) Progress
-	p               Progress
+	p               *Progress
 }
 
 // Create new future task
@@ -68,11 +68,11 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	swr.Store(false)
 	var sw sync.WaitGroup
 	it := &ITask{id: id, suspend: suspend, cancel: cancel, p: &Progress{current: nil}, sw: sw, swr: swr}
-	return &Task{id: id, awaiting: awaiting, ready: ready, it: it, fn: fn, p: Progress{current: nil}}
+	return &Task{id: id, awaiting: awaiting, ready: ready, it: it, fn: fn, p: &Progress{current: nil}}
 }
 
 func run(f *Task) {
-	f.p = f.fn(f.it)
+	*f.p = f.fn(f.it)
 	f.ready.Store(true)
 }
 
@@ -103,16 +103,16 @@ func (f *Task) TryResolve(fn func(*Progress, bool)) {
 		if f.ready.Load().(bool) {
 			f.ready.Store(false)
 			f.it.suspend.Store(false)
-			fn(&f.p, true)
+			fn(f.p, true)
 			f.awaiting.Store(false)
-			f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+			*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
 		} else if f.it.swr.Load().(bool) {
 			fn(f.it.p, false)
-			f.it.p.current = nil
+			*f.it.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
 			f.it.swr.Store(false)
 			f.it.sw.Done()
 		} else {
-			fn(&f.p, false)
+			fn(f.p, false)
 		}
 	}
 }
@@ -131,9 +131,10 @@ func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 			if f.ready.Load().(bool) {
 				f.ready.Store(false)
 				f.it.suspend.Store(false)
-				fn(&f.p, true)
+				fn(f.p, true)
 				f.awaiting.Store(false)
-				f.p = Progress{cancel: nil, complete: nil, _error: nil}
+				*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+				f.it.p.current = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
 			} else if f.IsDone() {
 				break
 			}
