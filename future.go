@@ -1,4 +1,4 @@
-// github.com/Ar37-rs
+// github.com/Ar37-rs/future
 
 package future
 
@@ -48,11 +48,11 @@ func (it *ITask) Send(value interface{}) {
 
 // Future task
 type Task struct {
-	id              uint
-	awaiting, ready *atomic.Value
-	it              *ITask
-	fn              func(*ITask) Progress
-	p               *Progress
+	id                       uint
+	awaiting, ready, changed *atomic.Value
+	it                       *ITask
+	fn                       func(*ITask) Progress
+	p                        *Progress
 }
 
 // Create new future task
@@ -62,13 +62,15 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	cancel := &atomic.Value{}
 	suspend := &atomic.Value{}
 	swr := &atomic.Value{}
+	changed := &atomic.Value{}
 	ready.Store(false)
 	awaiting.Store(false)
 	cancel.Store(false)
 	swr.Store(false)
+	changed.Store(false)
 	var sw sync.WaitGroup
 	it := &ITask{id: id, suspend: suspend, cancel: cancel, p: &Progress{current: nil}, sw: sw, swr: swr}
-	return &Task{id: id, awaiting: awaiting, ready: ready, it: it, fn: fn, p: &Progress{current: nil}}
+	return &Task{id: id, awaiting: awaiting, ready: ready, changed: changed, it: it, fn: fn, p: &Progress{current: nil}}
 }
 
 func run(f *Task) {
@@ -87,9 +89,33 @@ func (f *Task) TryDo() {
 	}
 }
 
+// Change task, make sure the task isn't in progress.
+func (f *Task) ChangeTask(fn func(f *ITask) Progress) {
+	if !f.awaiting.Load().(bool) {
+		*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+		*f.it.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+		f.ready.Store(false)
+		f.it.cancel.Store(false)
+		f.it.suspend.Store(false)
+		f.it.swr.Store(false)
+		f.fn = fn
+		f.changed.Store(true)
+	}
+}
+
 // Check if the task is in progress
 func (f *Task) IsInProgress() bool {
 	return f.awaiting.Load().(bool)
+}
+
+// Check if the task is changed
+func (f *Task) IsChanged() bool {
+	if f.changed.Load().(bool) {
+		f.changed.Store(false)
+		return true
+	} else {
+		return false
+	}
 }
 
 // Check if the task is done (not in progress anymore)
@@ -135,9 +161,8 @@ func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 				f.it.suspend.Store(false)
 				fn(f.p, true)
 				f.awaiting.Store(false)
-				p := Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-				*f.p = p
-				*f.it.p = p
+				*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+				*f.it.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
 			} else if f.IsDone() {
 				break
 			}
