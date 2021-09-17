@@ -120,6 +120,8 @@ func (f *Task) TryResolve(fn func(*Progress, bool)) {
 // Careful! this is blocking operation, resolve progress of the future task (will "block" until the task is completed).
 //
 // if spin_delay < 3 milliseconds, spin_delay value will be 3 milliseconds, set it large than that or accordingly.
+//
+// due to blocking operation nature this fn only return whether the task is canceled, completed or error. current progress (sender) will be ignored.
 func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 	if f.awaiting.Load().(bool) {
 		del := spin_delay
@@ -140,8 +142,8 @@ func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 				break
 			}
 			if f.it.swr.Load().(bool) {
-				f.it.sw.Done()
 				f.it.swr.Store(false)
+				f.it.sw.Done()
 			}
 			time.Sleep(_spin_delay)
 		}
