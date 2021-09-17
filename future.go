@@ -81,6 +81,7 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	ready.Store(false)
 	awaiting.Store(false)
 	cancel.Store(false)
+	suspend.Store(false)
 	swr.Store(false)
 	changed.Store(false)
 	var sw sync.WaitGroup
