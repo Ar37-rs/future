@@ -17,6 +17,7 @@ type ITask struct {
 	suspend, cancel, swr *atomic.Value
 	pc                   Value
 	sw                   sync.WaitGroup
+	rcvr                 *channel
 }
 
 // Get id of the task
@@ -38,12 +39,24 @@ func (it *ITask) ShouldSuspend() bool {
 	return it.cancel.Load().(bool)
 }
 
-// Send current task progress
+// Send current inner task progress
 func (it *ITask) Send(value interface{}) {
 	it.sw.Add(1)
 	it.pc = value
 	it.swr.Store(true)
 	it.sw.Wait()
+}
+
+// Receive value from the outer task (if any, and will return nil if nothing).
+func (it *ITask) Recv() Value {
+	// No need mutex, it's only bi directional data passing
+	val := it.rcvr.data
+	it.rcvr.data = nil
+	return val
+}
+
+type channel struct {
+	data Value
 }
 
 // Future task
@@ -53,6 +66,7 @@ type Task struct {
 	it                       *ITask
 	fn                       func(*ITask) Progress
 	p                        *Progress
+	sndr                     *channel
 }
 
 // Create new future task
@@ -63,14 +77,15 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	suspend := &atomic.Value{}
 	swr := &atomic.Value{}
 	changed := &atomic.Value{}
+	_channel := &channel{data: nil}
 	ready.Store(false)
 	awaiting.Store(false)
 	cancel.Store(false)
 	swr.Store(false)
 	changed.Store(false)
 	var sw sync.WaitGroup
-	it := &ITask{id: id, suspend: suspend, cancel: cancel, pc: nil, sw: sw, swr: swr}
-	return &Task{id: id, awaiting: awaiting, ready: ready, changed: changed, it: it, fn: fn, p: &Progress{current: nil}}
+	it := &ITask{id: id, suspend: suspend, cancel: cancel, pc: nil, sw: sw, swr: swr, rcvr: _channel}
+	return &Task{id: id, awaiting: awaiting, ready: ready, changed: changed, it: it, fn: fn, p: &Progress{current: nil}, sndr: _channel}
 }
 
 func run(f *Task) {
@@ -87,6 +102,11 @@ func (f *Task) TryDo() {
 		f.it.cancel.Store(false)
 		go run(f)
 	}
+}
+
+// Send value to the inner task
+func (it *Task) Send(value interface{}) {
+	it.sndr.data = value
 }
 
 // Change task, make sure the task isn't in progress.
