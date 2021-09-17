@@ -2,6 +2,12 @@
 
 Port of [asynchron](https://github.com/Ar37-rs/asynchron) to go.
 
+# Installation
+
+```sh
+go get -u github.com/Ar37-rs/future
+```
+
 # Example 
 
 ```go
@@ -17,9 +23,9 @@ func main() {
 	task1 := task.Future(1, func(it *task.ITask) task.Progress {
 		count := 0
 		for {
-			// // return task.Canceled(..) if canceled.
+			// // return task.Cancel(..) if canceled.
 			// if it.IsCanceled() {
-			// 	return task.Canceled("caceled")
+			// 	return task.Cancel("caceled")
 			// }
 			count += 1
 			time.Sleep(time.Millisecond * 10)
@@ -30,7 +36,7 @@ func main() {
 			}
 		}
 		complete := fmt.Sprintf(`the task with id: %d completed`, it.Id())
-		return task.Completed(complete)
+		return task.Complete(complete)
 		// // return error if need to.
 		// _error := errors.New(fmt.Sprintf(`the task with id: %d error`, it.Id()))
 		// return task.Error(_error)
@@ -51,11 +57,11 @@ func main() {
 				println(v.(string))
 			})
 
-			p.OnCanceled(func(v task.Value) {
+			p.OnCancel(func(v task.Value) {
 				println(v.(string))
 			})
 
-			p.OnCompleted(func(v task.Value) {
+			p.OnComplete(func(v task.Value) {
 				println(v.(string))
 			})
 

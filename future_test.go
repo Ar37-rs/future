@@ -11,7 +11,7 @@ func TestDrive(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			it.Send(i)
 		}
-		return task.Completed("Ok")
+		return task.Complete("Ok")
 	})
 
 	if test_task.Id() != 7 {
@@ -30,7 +30,7 @@ func TestDrive(t *testing.T) {
 				count += k
 			})
 
-			p.OnCompleted(func(v task.Value) {
+			p.OnComplete(func(v task.Value) {
 				// Check if return OnCompleted failure
 				if v.(string) != "Ok" {
 					t.Fatalf(`"OnCompleted test failure! with value: %s"`, v.(string))
