@@ -15,7 +15,7 @@ type Value = interface{}
 type ITask struct {
 	id                   uint
 	suspend, cancel, swr *atomic.Value
-	p                    *Progress
+	pc                   Value
 	sw                   sync.WaitGroup
 }
 
@@ -41,7 +41,7 @@ func (it *ITask) ShouldSuspend() bool {
 // Send current task progress
 func (it *ITask) Send(value interface{}) {
 	it.sw.Add(1)
-	it.p.current = value
+	it.pc = value
 	it.swr.Store(true)
 	it.sw.Wait()
 }
@@ -69,7 +69,7 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	swr.Store(false)
 	changed.Store(false)
 	var sw sync.WaitGroup
-	it := &ITask{id: id, suspend: suspend, cancel: cancel, p: &Progress{current: nil}, sw: sw, swr: swr}
+	it := &ITask{id: id, suspend: suspend, cancel: cancel, pc: nil, sw: sw, swr: swr}
 	return &Task{id: id, awaiting: awaiting, ready: ready, changed: changed, it: it, fn: fn, p: &Progress{current: nil}}
 }
 
@@ -93,7 +93,7 @@ func (f *Task) TryDo() {
 func (f *Task) ChangeTask(fn func(f *ITask) Progress) {
 	if !f.awaiting.Load().(bool) {
 		*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-		*f.it.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+		f.it.pc = nil
 		f.ready.Store(false)
 		f.it.cancel.Store(false)
 		f.it.suspend.Store(false)
@@ -133,8 +133,10 @@ func (f *Task) TryResolve(fn func(*Progress, bool)) {
 			f.awaiting.Store(false)
 			*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
 		} else if f.it.swr.Load().(bool) {
-			fn(f.it.p, false)
-			*f.it.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+			f.p.current = f.it.pc
+			fn(f.p, false)
+			f.it.pc = nil
+			f.p.current = nil
 			f.it.swr.Store(false)
 			f.it.sw.Done()
 		} else {
@@ -148,7 +150,7 @@ func (f *Task) TryResolve(fn func(*Progress, bool)) {
 // if spin_delay < 3 milliseconds, spin_delay value will be 3 milliseconds, set it large than that or accordingly.
 //
 // due to blocking operation nature this fn only return whether the task is canceled, completed or error. current progress (sender) will be ignored.
-func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
+func (f *Task) WaitResolve(spin_delay uint, fn func(*Progress, bool)) {
 	if f.awaiting.Load().(bool) {
 		del := spin_delay
 		if spin_delay < 3 {
@@ -162,7 +164,7 @@ func (f *Task) Resolve(spin_delay uint, fn func(*Progress, bool)) {
 				fn(f.p, true)
 				f.awaiting.Store(false)
 				*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-				*f.it.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+				f.it.pc = nil
 			} else if f.IsDone() {
 				break
 			}

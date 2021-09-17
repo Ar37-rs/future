@@ -31,9 +31,9 @@ func TestDrive(t *testing.T) {
 			})
 
 			p.OnComplete(func(v task.Value) {
-				// Check if return OnCompleted failure
+				// Check if return OnComplete failure
 				if v.(string) != "Ok" {
-					t.Fatalf(`"OnCompleted test failure! with value: %s"`, v.(string))
+					t.Fatalf(`"OnComplete test failure! with value: %s"`, v.(string))
 				}
 			})
 
