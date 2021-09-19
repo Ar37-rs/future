@@ -106,9 +106,6 @@ func main() {
 			counter += 1
 		}
 	})
-	if runnable_task.Id() != 8 {
-		t.Fatalf(`"runnable_task id test failure! with value: %d"`, runnable_task.Id())
-	}
 	// Try do the task now.
 	runnable_task.TryDo()
 	println(fmt.Sprintf(`task id: %d`, runnable_task.Id()))
