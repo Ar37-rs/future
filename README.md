@@ -8,7 +8,7 @@ Port of [asynchron](https://github.com/Ar37-rs/asynchron) to go.
 go get -u github.com/Ar37-rs/future
 ```
 
-# Future Task Example 
+# Future Task Example: 
 
 ```go
 package main
@@ -82,7 +82,7 @@ func main() {
 ```
 
 
-# Runnable Task Example 
+# Runnable Task Example: 
 
 ```go
 package main
