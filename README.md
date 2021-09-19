@@ -8,7 +8,7 @@ Port of [asynchron](https://github.com/Ar37-rs/asynchron) to go.
 go get -u github.com/Ar37-rs/future
 ```
 
-# Example 
+# Future Task Example 
 
 ```go
 package main
@@ -20,6 +20,7 @@ import (
 )
 
 func main() {
+	// Create new future task.
 	task1 := task.Future(1, func(it *task.ITask) task.Progress {
 		count := 0
 		for {
@@ -42,14 +43,12 @@ func main() {
 		// _error := fmt.Errorf(`the task with id: %d error`, it.Id())
 		// return task.Error(_error)
 	})
-
 	println(fmt.Sprintf(`task id: %d`, task1.Id()))
+	// Try do the task now.
 	task1.TryDo()
 	// // Cancel if need to.
 	// task1.Cancel()
-
 	quit := false
-
 	for {
 		println("this event loop won't be blocked.")
 		time.Sleep(time.Millisecond * 100)
@@ -79,5 +78,50 @@ func main() {
 			break
 		}
 	}
+}
+```
+
+
+# Runnable Task Example 
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+	task "github.com/Ar37-rs/future"
+)
+
+func main() {
+	counter := 0
+	// Create new runnable task.
+	runnable_task := task.Runnable(8, func(it *task.IRTask) {
+		for {
+			// Make sure the loop not spin too fast, sleep a few millis if need to be canceled.
+			time.Sleep(time.Millisecond * 10)
+			if it.ShouldCancel() || counter > 5 {
+				break
+			}
+			counter += 1
+		}
+	})
+	if runnable_task.Id() != 8 {
+		t.Fatalf(`"runnable_task id test failure! with value: %d"`, runnable_task.Id())
+	}
+	// Try do the task now.
+	runnable_task.TryDo()
+	println(fmt.Sprintf(`task id: %d`, runnable_task.Id()))
+	// // Cancel if need to.
+	// runnable_task.Cancel()
+	for {
+		if runnable_task.IsNotRunning() {
+			break
+		}
+	}
+	if runnable_task.IsCanceled() {
+		println("runnable task canceled.")
+	}
+	println(fmt.Sprintf(`counter value: %d`, counter))
 }
 ```

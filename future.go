@@ -13,11 +13,11 @@ type Value = interface{}
 
 // Inner Task
 type ITask struct {
-	id                   uint
-	suspend, cancel, swr *atomic.Value
-	pc                   Value
-	sw                   sync.WaitGroup
-	rcvr                 *channel
+	id                          uint
+	suspend, cancel, sync_ready *atomic.Value
+	current_progress            Value
+	sync_wg                     sync.WaitGroup
+	receiver                    *channel
 }
 
 // Get id of the task
@@ -34,24 +34,24 @@ func (it *ITask) ShouldCancel() bool {
 //
 // usually applied for a specific task with event loop in it.
 //
-// do other things (switch) while the task is suspended.
+// do other things (sync_wgitch) while the task is suspended.
 func (it *ITask) ShouldSuspend() bool {
-	return it.cancel.Load().(bool)
+	return it.suspend.Load().(bool)
 }
 
 // Send current inner task progress
 func (it *ITask) Send(value interface{}) {
-	it.sw.Add(1)
-	it.pc = value
-	it.swr.Store(true)
-	it.sw.Wait()
+	it.sync_wg.Add(1)
+	it.current_progress = value
+	it.sync_ready.Store(true)
+	it.sync_wg.Wait()
 }
 
 // Receive value from the outer task (if any, and will return nil if nothing).
 func (it *ITask) Recv() Value {
 	// No need mutex, it's only bi directional data passing
-	val := it.rcvr.data
-	it.rcvr.data = nil
+	val := it.receiver.data
+	it.receiver.data = nil
 	return val
 }
 
@@ -63,10 +63,10 @@ type channel struct {
 type Task struct {
 	id                       uint
 	awaiting, ready, changed *atomic.Value
-	it                       *ITask
+	inner_task               *ITask
 	fn                       func(*ITask) Progress
-	p                        *Progress
-	sndr                     *channel
+	progress                 *Progress
+	sender                   *channel
 }
 
 // Create new future task
@@ -75,22 +75,22 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	ready := &atomic.Value{}
 	cancel := &atomic.Value{}
 	suspend := &atomic.Value{}
-	swr := &atomic.Value{}
+	sync_ready := &atomic.Value{}
 	changed := &atomic.Value{}
 	_channel := &channel{data: nil}
 	ready.Store(false)
 	awaiting.Store(false)
 	cancel.Store(false)
 	suspend.Store(false)
-	swr.Store(false)
+	sync_ready.Store(false)
 	changed.Store(false)
-	var sw sync.WaitGroup
-	it := &ITask{id: id, suspend: suspend, cancel: cancel, pc: nil, sw: sw, swr: swr, rcvr: _channel}
-	return &Task{id: id, awaiting: awaiting, ready: ready, changed: changed, it: it, fn: fn, p: &Progress{current: nil}, sndr: _channel}
+	var sync_wg sync.WaitGroup
+	inner_task := &ITask{id: id, suspend: suspend, cancel: cancel, current_progress: nil, sync_wg: sync_wg, sync_ready: sync_ready, receiver: _channel}
+	return &Task{id: id, awaiting: awaiting, ready: ready, changed: changed, inner_task: inner_task, fn: fn, progress: &Progress{current: nil}, sender: _channel}
 }
 
 func run(f *Task) {
-	*f.p = f.fn(f.it)
+	*f.progress = f.fn(f.inner_task)
 	f.ready.Store(true)
 }
 
@@ -100,25 +100,25 @@ func run(f *Task) {
 func (f *Task) TryDo() {
 	if !f.awaiting.Load().(bool) {
 		f.awaiting.Store(true)
-		f.it.cancel.Store(false)
+		f.inner_task.cancel.Store(false)
 		go run(f)
 	}
 }
 
 // Send value to the inner task
 func (it *Task) Send(value interface{}) {
-	it.sndr.data = value
+	it.sender.data = value
 }
 
 // Change task, make sure the task isn't in progress.
 func (f *Task) ChangeTask(fn func(f *ITask) Progress) {
 	if !f.awaiting.Load().(bool) {
-		*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-		f.it.pc = nil
+		*f.progress = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+		f.inner_task.current_progress = nil
 		f.ready.Store(false)
-		f.it.cancel.Store(false)
-		f.it.suspend.Store(false)
-		f.it.swr.Store(false)
+		f.inner_task.cancel.Store(false)
+		f.inner_task.suspend.Store(false)
+		f.inner_task.sync_ready.Store(false)
 		f.fn = fn
 		f.changed.Store(true)
 	}
@@ -149,19 +149,19 @@ func (f *Task) TryResolve(fn func(*Progress, bool)) {
 	if f.awaiting.Load().(bool) {
 		if f.ready.Load().(bool) {
 			f.ready.Store(false)
-			f.it.suspend.Store(false)
-			fn(f.p, true)
+			f.inner_task.suspend.Store(false)
+			fn(f.progress, true)
 			f.awaiting.Store(false)
-			*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-		} else if f.it.swr.Load().(bool) {
-			f.p.current = f.it.pc
-			fn(f.p, false)
-			f.it.pc = nil
-			f.p.current = nil
-			f.it.swr.Store(false)
-			f.it.sw.Done()
+			*f.progress = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+		} else if f.inner_task.sync_ready.Load().(bool) {
+			f.progress.current = f.inner_task.current_progress
+			fn(f.progress, false)
+			f.inner_task.current_progress = nil
+			f.progress.current = nil
+			f.inner_task.sync_ready.Store(false)
+			f.inner_task.sync_wg.Done()
 		} else {
-			fn(f.p, false)
+			fn(f.progress, false)
 		}
 	}
 }
@@ -181,52 +181,54 @@ func (f *Task) WaitResolve(spin_delay uint, fn func(*Progress, bool)) {
 		for {
 			if f.ready.Load().(bool) {
 				f.ready.Store(false)
-				f.it.suspend.Store(false)
-				fn(f.p, true)
+				f.inner_task.suspend.Store(false)
+				fn(f.progress, true)
 				f.awaiting.Store(false)
-				*f.p = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
-				f.it.pc = nil
+				*f.progress = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+				f.inner_task.current_progress = nil
 			} else if f.IsDone() {
 				break
 			}
-			if f.it.swr.Load().(bool) {
-				f.it.swr.Store(false)
-				f.it.sw.Done()
+			if f.inner_task.sync_ready.Load().(bool) {
+				f.inner_task.sync_ready.Store(false)
+				f.inner_task.sync_wg.Done()
 			}
 			time.Sleep(_spin_delay)
 		}
 	}
 }
 
-// Send signal to the inner task handle that the task should be suspended.
+// Send signal to the inner task that the task should be suspended.
 //
 // this won't do anything if not explicitly configured inside the task.
 func (f *Task) Suspend() {
-	f.it.suspend.Store(true)
+	if f.IsInProgress() {
+		f.inner_task.suspend.Store(true)
+	}
 }
 
 // Resume the suspended task.
 //
 // this won't do anything if not explicitly configured inside the task.
 func (f *Task) Resume() {
-	f.it.suspend.Store(false)
+	f.inner_task.suspend.Store(false)
 }
 
 // Check if the task is suspended
-func (f *Task) IsSuspended() {
-	f.it.suspend.Store(true)
+func (f *Task) IsSuspended() bool {
+	return f.inner_task.suspend.Load().(bool)
 }
 
-// Send signal to the inner task handle that the task should be canceled.
+// Send signal to the inner task that the task should be canceled.
 //
 // this won't do anything if not explicitly configured inside the task.
 func (f *Task) Cancel() {
-	f.it.cancel.Store(true)
+	f.inner_task.cancel.Store(true)
 }
 
 // Check if the task is canceled
 func (f *Task) IsCanceled() bool {
-	return f.it.cancel.Load().(bool)
+	return f.inner_task.cancel.Load().(bool)
 }
 
 // Get id of the task
@@ -279,4 +281,134 @@ func (p *Progress) OnError(fn func(error)) {
 	if err := p._error; err != nil {
 		fn(err)
 	}
+}
+
+// Inner Runnable Task
+type IRTask struct {
+	id              uint
+	suspend, cancel *atomic.Value
+}
+
+// Get id of the task
+func (it *IRTask) Id() uint {
+	return it.id
+}
+
+// Check if the runnable task should be canceled.
+func (it *IRTask) ShouldCancel() bool {
+	return it.cancel.Load().(bool)
+}
+
+// Check if the task runnable should be suspended,
+//
+// usually applied for a specific task with event loop in it.
+//
+// do other things (switch) while the task is suspended.
+func (it *IRTask) ShouldSuspend() bool {
+	return it.suspend.Load().(bool)
+}
+
+// Future task
+type RTask struct {
+	id               uint
+	running, changed *atomic.Value
+	it               *IRTask
+	fn               func(*IRTask)
+}
+
+// Create new runnable task
+func Runnable(id uint, fn func(f *IRTask)) *RTask {
+	running := &atomic.Value{}
+	suspend := &atomic.Value{}
+	cancel := &atomic.Value{}
+	changed := &atomic.Value{}
+	running.Store(false)
+	suspend.Store(false)
+	cancel.Store(false)
+	changed.Store(false)
+	it := &IRTask{id: id, suspend: suspend, cancel: cancel}
+	return &RTask{id: id, running: running, changed: changed, it: it, fn: fn}
+}
+
+func _run(f *RTask) {
+	f.fn(f.it)
+	f.running.Store(false)
+	f.it.suspend.Store(false)
+}
+
+// Try do the runnable task now (it won't block the current thread)
+func (f *RTask) TryDo() {
+	if !f.running.Load().(bool) {
+		f.running.Store(true)
+		f.it.cancel.Store(false)
+		go _run(f)
+	}
+}
+
+// Change the runnable task, make sure the task isn't running.
+func (f *RTask) ChangeTask(fn func(f *IRTask)) {
+	if !f.running.Load().(bool) {
+		f.it.cancel.Store(false)
+		f.it.suspend.Store(false)
+		f.fn = fn
+		f.changed.Store(true)
+	}
+}
+
+// Check if the task is running
+func (f *RTask) IsRunning() bool {
+	return f.running.Load().(bool)
+}
+
+// Check if the task is changed
+func (f *RTask) IsChanged() bool {
+	if f.changed.Load().(bool) {
+		f.changed.Store(false)
+		return true
+	} else {
+		return false
+	}
+}
+
+// Check if the runnable task is not running anymore (or done)
+func (f *RTask) IsNotRunning() bool {
+	return !f.running.Load().(bool)
+}
+
+// Send signal to the inner runnable task handle that the task should be suspended.
+//
+// this won't do anything if not explicitly configured inside the task.
+func (f *RTask) Suspend() {
+	if f.IsRunning() {
+		f.it.suspend.Store(true)
+	}
+}
+
+// Resume the suspended runnable task.
+//
+// this won't do anything if not explicitly configured inside the task.
+func (f *RTask) Resume() {
+	f.it.suspend.Store(false)
+}
+
+// Check if the task is suspended
+func (f *RTask) IsSuspended() bool {
+	return f.it.suspend.Load().(bool)
+}
+
+// Send signal to the  inner runnable handle that the task should be canceled.
+//
+// this won't do anything if not explicitly configured inside the task.
+func (f *RTask) Cancel() {
+	f.it.cancel.Store(true)
+}
+
+// Check if the runnable task is canceled
+func (f *RTask) IsCanceled() bool {
+	return f.it.cancel.Load().(bool)
+}
+
+// Get id of the runnable task
+func (f *RTask) Id() uint {
+	return f.id
 }
