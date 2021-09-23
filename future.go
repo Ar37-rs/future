@@ -309,11 +309,11 @@ func (it *IRTask) ShouldCancel() bool {
 	return it.cancel.Load().(bool)
 }
 
-// Check if the task runnable should be suspended,
+// Check if the runnable task should be suspended,
 //
 // usually applied for a specific task with event loop in it.
 //
-// do other things (switch) while the task is suspended or Suspend() the task immediately.
+// do other things (switch) while the task is suspended or Wait() the task immediately.
 func (it *IRTask) ShouldSuspend() bool {
 	return it.suspend.Load().(bool)
 }
