@@ -16,7 +16,8 @@ type ITask struct {
 	id                          uint
 	suspend, cancel, sync_ready *atomic.Value
 	current_progress            Value
-	sync_wg                     sync.WaitGroup
+	sync_wg                     *sync.WaitGroup
+	mtx                         *sync.Mutex
 	receiver                    *channel
 }
 
@@ -49,16 +50,20 @@ func (it *ITask) Wait() {
 // Send current inner task progress
 func (it *ITask) Send(value interface{}) {
 	it.sync_wg.Add(1)
+	it.mtx.Lock()
 	it.current_progress = value
+	it.mtx.Unlock()
 	it.sync_ready.Store(true)
 	it.sync_wg.Wait()
 }
 
 // Receive value from the outer task (if any, and will return nil if nothing).
 func (it *ITask) Recv() Value {
-	// No need mutex, it's only bi directional data passing
+	// use mutex for extensibility, e.g: receiving progress from other goroutine.
+	it.mtx.Lock()
 	val := it.receiver.data
 	it.receiver.data = nil
+	it.mtx.Unlock()
 	return val
 }
 
@@ -90,7 +95,8 @@ func Future(id uint, fn func(f *ITask) Progress) *Task {
 	sync_ready.Store(false)
 	changed.Store(false)
 	var sync_wg sync.WaitGroup
-	inner_task := &ITask{id: id, suspend: suspend, cancel: cancel, current_progress: nil, sync_wg: sync_wg, sync_ready: sync_ready, receiver: _channel}
+	var mtx sync.Mutex
+	inner_task := &ITask{id: id, suspend: suspend, cancel: cancel, current_progress: nil, sync_wg: &sync_wg, mtx: &mtx, sync_ready: sync_ready, receiver: _channel}
 	return &Task{awaiting: awaiting, ready: ready, changed: changed, inner_task: inner_task, fn: fn, progress: &Progress{current: nil}}
 }
 
@@ -112,7 +118,9 @@ func (f *Task) TryDo() {
 
 // Send value to the inner task
 func (it *Task) Send(value interface{}) {
+	it.inner_task.mtx.Lock()
 	it.inner_task.receiver.data = value
+	it.inner_task.mtx.Unlock()
 }
 
 // Change task, make sure the task isn't in progress.
@@ -157,12 +165,18 @@ func (f *Task) TryResolve(fn func(*Progress, bool)) {
 			f.inner_task.suspend.Store(false)
 			fn(f.progress, true)
 			f.awaiting.Store(false)
+			f.inner_task.mtx.Lock()
 			*f.progress = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
+			f.inner_task.mtx.Unlock()
 		} else if f.inner_task.sync_ready.Load().(bool) {
+			f.inner_task.mtx.Lock()
 			f.progress.current = f.inner_task.current_progress
+			f.inner_task.mtx.Unlock()
 			fn(f.progress, false)
+			f.inner_task.mtx.Lock()
 			f.inner_task.current_progress = nil
 			f.progress.current = nil
+			f.inner_task.mtx.Unlock()
 			f.inner_task.sync_ready.Store(false)
 			f.inner_task.sync_wg.Done()
 		} else {
@@ -189,8 +203,10 @@ func (f *Task) WaitResolve(spin_delay uint, fn func(*Progress, bool)) {
 				f.inner_task.suspend.Store(false)
 				fn(f.progress, true)
 				f.awaiting.Store(false)
+				f.inner_task.mtx.Lock()
 				*f.progress = Progress{current: nil, cancel: nil, complete: nil, _error: nil}
 				f.inner_task.current_progress = nil
+				f.inner_task.mtx.Unlock()
 			} else if f.IsDone() {
 				break
 			}
@@ -296,7 +312,7 @@ func (p *Progress) OnError(fn func(error)) {
 type IRTask struct {
 	id              uint
 	suspend, cancel *atomic.Value
-	sync_wg         sync.WaitGroup
+	sync_wg         *sync.WaitGroup
 }
 
 // Get id of the task
@@ -343,7 +359,7 @@ func Runnable(id uint, fn func(f *IRTask)) *RTask {
 	cancel.Store(false)
 	changed.Store(false)
 	var sync_wg sync.WaitGroup
-	inner_task := &IRTask{id: id, suspend: suspend, cancel: cancel, sync_wg: sync_wg}
+	inner_task := &IRTask{id: id, suspend: suspend, cancel: cancel, sync_wg: &sync_wg}
 	return &RTask{running: running, changed: changed, inner_task: inner_task, fn: fn}
 }
 
